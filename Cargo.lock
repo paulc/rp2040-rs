@@ -1134,6 +1134,7 @@ dependencies = [
  "embassy-usb",
  "embassy-usb-logger",
  "heapless",
+ "log",
  "panic-probe",
  "smart-leds",
 ]

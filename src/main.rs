@@ -1,20 +1,26 @@
 #![no_std]
 #![no_main]
 
-use defmt::*;
 use embassy_executor::Spawner;
 use embassy_rp::bind_interrupts;
-use embassy_rp::peripherals::{PIO0, PIO1};
-use embassy_rp::pio::{InterruptHandler, Pio};
+use embassy_rp::peripherals::{PIO0, PIO1, USB};
+use embassy_rp::pio::{self, Pio};
 use embassy_rp::pio_programs::ws2812::{PioWs2812, PioWs2812Program};
+use embassy_rp::usb::{self, Driver};
 use embassy_time::{Duration, Ticker, Timer};
 use smart_leds::RGB8;
 use {defmt_rtt as _, panic_probe as _};
 
 bind_interrupts!(struct Irqs {
-    PIO0_IRQ_0 => InterruptHandler<PIO0>;
-    PIO1_IRQ_0 => InterruptHandler<PIO1>;
+    PIO0_IRQ_0 => pio::InterruptHandler<PIO0>;
+    PIO1_IRQ_0 => pio::InterruptHandler<PIO1>;
+    USBCTRL_IRQ => usb::InterruptHandler<USB>;
 });
+
+#[embassy_executor::task]
+async fn logger_task(driver: Driver<'static, USB>) {
+    embassy_usb_logger::run!(1024, log::LevelFilter::Debug, driver);
+}
 
 const NUM_LEDS: usize = 8;
 const STATE_MACHINE: usize = 0;
@@ -74,6 +80,7 @@ async fn chase(pio: Ws2812PioDevice, dma: Ws2812DMADevice, pin: Ws2812Pin, delay
     let mut c = 0_u8;
     loop {
         let colour = set_brightness(colour_wheel(c), 0.5);
+        log::debug!("CHASE --> R: {} G: {} B: {}", colour.r, colour.g, colour.b);
         data[index] = colour;
         for offset in 1..NUM_LEDS {
             let i = wrap(index, -(offset as i32), NUM_LEDS);
@@ -110,13 +117,17 @@ async fn wheel(
     let mut ticker = Ticker::every(Duration::from_millis(10));
     loop {
         for j in 0..(256 * 5) {
-            debug!("New Colors:");
             for i in 0..N {
                 data[i] = set_brightness(
                     colour_wheel((((i * 256) as u16 / N as u16 + j as u16) & 255) as u8),
                     brightness,
                 );
-                debug!("R: {} G: {} B: {}", data[i].r, data[i].g, data[i].b);
+                log::debug!(
+                    "WHEEL --> R: {} G: {} B: {}",
+                    data[i].r,
+                    data[i].g,
+                    data[i].b
+                );
             }
             ws2812.write(&data).await;
 
@@ -127,11 +138,20 @@ async fn wheel(
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    info!("Start");
+    log::info!("Start");
     let p = embassy_rp::init(Default::default());
+
+    // USB Logger
+    let driver = Driver::new(p.USB, Irqs);
+    spawner.spawn(logger_task(driver)).unwrap();
+
     spawner.must_spawn(chase(p.PIO0, p.DMA_CH0, p.PIN_14, 100));
     spawner.must_spawn(wheel(p.PIO1, p.DMA_CH1, p.PIN_16, 0.5));
+
+    let mut c = 0;
     loop {
-        Timer::after_millis(500).await;
+        Timer::after_millis(1000).await;
+        log::info!("Tick: {}", c);
+        c += 1;
     }
 }
