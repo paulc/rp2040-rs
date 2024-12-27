@@ -71,7 +71,6 @@ async fn chase(pio: Ws2812PioDevice, dma: Ws2812DMADevice, pin: Ws2812Pin, delay
     } = Pio::new(pio, Irqs);
 
     let program = PioWs2812Program::new(&mut common);
-    // Internal RP2040-Zero WS2812 pin = p.PIN_16
     let mut ws2812: Ws2812Strip = PioWs2812::new(&mut common, sm0, dma, pin, &program);
 
     let mut index = 0;
@@ -80,7 +79,7 @@ async fn chase(pio: Ws2812PioDevice, dma: Ws2812DMADevice, pin: Ws2812Pin, delay
     let mut c = 0_u8;
     loop {
         let colour = set_brightness(colour_wheel(c), 0.5);
-        log::debug!("CHASE --> R: {} G: {} B: {}", colour.r, colour.g, colour.b);
+        log::debug!("CHASE COLOUR --> {:?}", colour);
         data[index] = colour;
         for offset in 1..NUM_LEDS {
             let i = wrap(index, -(offset as i32), NUM_LEDS);
@@ -113,7 +112,6 @@ async fn wheel(
 
     const N: usize = 1;
     let mut data = [RGB8::default(); N];
-    // Loop forever making RGB values and pushing them out to the WS2812.
     let mut ticker = Ticker::every(Duration::from_millis(10));
     loop {
         for j in 0..(256 * 5) {
@@ -122,15 +120,8 @@ async fn wheel(
                     colour_wheel((((i * 256) as u16 / N as u16 + j as u16) & 255) as u8),
                     brightness,
                 );
-                log::debug!(
-                    "WHEEL --> R: {} G: {} B: {}",
-                    data[i].r,
-                    data[i].g,
-                    data[i].b
-                );
             }
             ws2812.write(&data).await;
-
             ticker.next().await;
         }
     }
@@ -143,8 +134,9 @@ async fn main(spawner: Spawner) {
 
     // USB Logger
     let driver = Driver::new(p.USB, Irqs);
-    spawner.spawn(logger_task(driver)).unwrap();
+    spawner.must_spawn(logger_task(driver));
 
+    // WS2812 tasks
     spawner.must_spawn(chase(p.PIO0, p.DMA_CH0, p.PIN_14, 100));
     spawner.must_spawn(wheel(p.PIO1, p.DMA_CH1, p.PIN_16, 0.5));
 
