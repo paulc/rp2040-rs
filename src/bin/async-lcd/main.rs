@@ -43,15 +43,16 @@ pub async fn display(pins: DisplayPins, spi: DisplaySpi, rxdma: DisplaySpiRxDma)
     let mut config = spi::Config::default();
     config.frequency = 64_000_000;
 
-    let mut delay = embassy_time::Delay;
+    let spi = spi::Spi::new_txonly(spi, pins.sck, pins.mosi, rxdma, config);
+    let dc = Output::new(pins.dc, Level::Low);
+    let cs = Output::new(pins.cs, Level::High);
+    let reset = Output::new(pins.reset, Level::Low);
+    let _backlight = Output::new(pins.backlight, Level::High);
 
-    let spi_bus = spi::Spi::new_txonly(spi, pins.sck, pins.mosi, rxdma, config);
+    let display = AsyncST7735::new(spi, dc, cs, reset);
 
-    let lcd_dc = Output::new(pins.dc, Level::Low);
-    let lcd_cs = Output::new(pins.cs, Level::High);
-    let lcd_reset = Output::new(pins.reset, Level::Low);
-    let mut lcd_backlight = Output::new(pins.backlight, Level::High);
-
+    /*
+    let delay = embassy_time::Delay;
     let spi_device = ExclusiveDevice::new(spi_bus, lcd_cs, delay.clone()).unwrap();
     let display_interface = SPIInterface::new(spi_device, lcd_dc);
 
@@ -73,6 +74,49 @@ pub async fn display(pins: DisplayPins, spi: DisplaySpi, rxdma: DisplaySpiRxDma)
             log::info!("Display Done....");
             Timer::after_millis(1000).await;
         }
+    }
+    */
+}
+
+struct AsyncST7735<'a> {
+    spi: spi::Spi<'a, DisplaySpi, spi::Async>,
+    dc: Output<'a>,
+    cs: Output<'a>,
+    reset: Output<'a>,
+}
+
+impl<'a> AsyncST7735<'a> {
+    pub async fn new(
+        spi: spi::Spi<'a, DisplaySpi, spi::Async>,
+        dc: Output<'a>,
+        cs: Output<'a>,
+        reset: Output<'a>,
+    ) -> Result<Self, spi::Error> {
+        let mut display = AsyncST7735 { spi, dc, cs, reset };
+        display.init().await?;
+        Ok(display)
+    }
+    async fn init(&mut self) -> Result<(), spi::Error> {
+        Timer::after_micros(200000).await;
+        self.send_command(0x11, &[]).await?; // Exit sleep mode
+
+        Ok(())
+    }
+    async fn send_command(&mut self, command: u8, data: &[u8]) -> Result<(), spi::Error> {
+        self.dc.set_low();
+        self.cs.set_low();
+        self.spi.write(&[command]).await?;
+        self.dc.set_high();
+        self.spi.write(data).await?;
+        self.cs.set_high();
+        Ok(())
+    }
+    async fn send_data(&mut self, data: &[u8]) -> Result<(), spi::Error> {
+        self.dc.set_high();
+        self.cs.set_low();
+        self.spi.write(data).await?;
+        self.cs.set_high();
+        Ok(())
     }
 }
 

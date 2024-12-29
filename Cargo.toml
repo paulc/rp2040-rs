@@ -26,6 +26,7 @@ display-interface-spi = "0.5.0"
 embedded-hal-bus = "0.2.0"
 embedded-graphics = "0.8.1"
 mipidsi = "0.8.0"
+embedded-hal = "1.0.0"
 
 [profile.release]
 debug = 2
@@ -43,4 +44,8 @@ harness = false
 
 [[bin]]
 name = "lcd"
+harness = false
+
+[[bin]]
+name = "async-lcd"
 harness = false
